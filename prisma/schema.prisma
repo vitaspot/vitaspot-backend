@@ -1,0 +1,301 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  USER
+  BUSINESS
+  EDITOR
+  ADMIN
+}
+
+enum ClinicStatus {
+  DRAFT
+  PENDING_REVIEW
+  PUBLISHED
+  REJECTED
+  ARCHIVED
+}
+
+enum BadgeType {
+  VERIFIED
+  PARTNER
+  PREMIUM
+  NEW
+}
+
+enum ClaimStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum QuoteStatus {
+  NEW
+  TRANSMITTED
+  QUALIFIED
+  CLOSED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  PAST_DUE
+  INCOMPLETE
+}
+
+// ==========================================
+// 1. UTILISATEURS & AUTHENTIFICATION
+// ==========================================
+
+model User {
+  id                 String             @id @default(uuid())
+  email              String             @unique
+  passwordHash       String
+  role               Role               @default(USER)
+  hasPremiumPass     Boolean            @default(false)
+  stripeCustomerId   String?            @unique
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  profile            UserProfile?
+  ownedClinics       Clinic[]           @relation("ClinicOwner")
+  claims             ClinicClaim[]
+  quoteRequests      QuoteRequest[]
+  subscriptions      Subscription[]
+  payments           Payment[]
+  auditLogs          AuditLog[]
+
+  @@map("users")
+}
+
+model UserProfile {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstName String?
+  lastName  String?
+  phone     String?
+  country   String?
+
+  @@map("user_profiles")
+}
+
+// ==========================================
+// 2. ANNUAIRE, CLINIQUES & CARTE LEAFLET
+// ==========================================
+
+model Specialty {
+  id        String            @id @default(uuid())
+  name      String            @unique
+  slug      String            @unique
+  clinics   ClinicSpecialty[]
+
+  @@map("specialties")
+}
+
+model Clinic {
+  id               String            @id @default(uuid())
+  slug             String            @unique
+  name             String
+  logoUrl          String?
+  coverImageUrl    String?
+  country          String
+  city             String
+  address          String?
+  phone            String?
+  whatsapp         String?
+  rating           Float             @default(0.0)
+  reviewsCount     Int               @default(0)
+  priceRange       String?
+  description      String
+  equipments       String[]          @default([])
+  languagesSpoken  String[]          @default([])
+  badges           BadgeType[]       @default([])
+  isSponsored      Boolean           @default(false)
+  isEmergency24_7  Boolean           @default(false)
+  status           ClinicStatus      @default(PENDING_REVIEW)
+  
+  // Coordonnées pour Leaflet OpenStreetMap
+  latitude         Float?
+  longitude        Float?
+
+  ownerId          String?
+  owner            User?             @relation("ClinicOwner", fields: [ownerId], references: [id])
+
+  doctors          Doctor[]
+  specialties      ClinicSpecialty[]
+  claims           ClinicClaim[]
+  quoteRequests    QuoteRequest[]
+  leads            Lead[]
+
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([country, city])
+  @@index([city])
+  @@index([country])
+  @@index([name])
+  @@index([status])
+  @@map("clinics")
+}
+
+model ClinicSpecialty {
+  clinicId    String
+  specialtyId String
+  clinic      Clinic    @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  specialty   Specialty @relation(fields: [specialtyId], references: [id], onDelete: Cascade)
+
+  @@id([clinicId, specialtyId])
+  @@map("clinic_specialties")
+}
+
+model Doctor {
+  id            String   @id @default(uuid())
+  clinicId      String
+  clinic        Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  name          String
+  specialty     String
+  qualification String
+  photoUrl      String?
+
+  @@map("doctors")
+}
+
+model ClinicClaim {
+  id            String      @id @default(uuid())
+  clinicId      String
+  clinic        Clinic      @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  licenseNumber String?
+  status        ClaimStatus @default(PENDING)
+  createdAt     DateTime    @default(now())
+
+  @@map("clinic_claims")
+}
+
+// ==========================================
+// 3. GUIDES ÉDITORIAUX
+// ==========================================
+
+model Guide {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  title       String
+  category    String
+  readTime    String
+  summary     String
+  content     String
+  imageUrl    String
+  author      String
+  isPublished Boolean  @default(true)
+  publishedAt DateTime @default(now())
+
+  @@map("guides")
+}
+
+// ==========================================
+// 4. DEVIS, LEADS & ASSURANCES
+// ==========================================
+
+model QuoteRequest {
+  id                 String      @id @default(uuid())
+  clinicId           String?
+  clinic             Clinic?     @relation(fields: [clinicId], references: [id])
+  userId             String?
+  user               User?       @relation(fields: [userId], references: [id])
+  specialty          String
+  treatment          String?
+  destinationCountry String
+  fullName           String
+  email              String
+  phone              String
+  residenceCountry   String
+  estimatedBudget    String?
+  optInInsurance     Boolean     @default(false)
+  status             QuoteStatus @default(NEW)
+  createdAt          DateTime    @default(now())
+
+  @@map("quote_requests")
+}
+
+model Lead {
+  id         String   @id @default(uuid())
+  clinicId   String
+  clinic     Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  type       String   // "PHONE_UNLOCK", "WHATSAPP_CLICK", "QUOTE"
+  userIp     String?
+  createdAt  DateTime @default(now())
+
+  @@map("leads")
+}
+
+model InsuranceInquiry {
+  id          String   @id @default(uuid())
+  offerId     String
+  fullName    String
+  email       String
+  phone       String
+  country     String
+  createdAt   DateTime @default(now())
+
+  @@map("insurance_inquiries")
+}
+
+// ==========================================
+// 5. PAIEMENTS & ABONNEMENTS STRIPE
+// ==========================================
+
+model Subscription {
+  id                   String             @id @default(uuid())
+  userId               String
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stripeSubscriptionId String             @unique
+  stripePriceId        String
+  planType             String             // "PREMIUM_PRO", "SPONSORED_PRO"
+  status               SubscriptionStatus @default(ACTIVE)
+  currentPeriodEnd     DateTime
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@map("subscriptions")
+}
+
+model Payment {
+  id                    String   @id @default(uuid())
+  userId                String?
+  user                  User?    @relation(fields: [userId], references: [id])
+  stripeSessionId       String   @unique
+  stripePaymentIntentId String?  @unique
+  amount                Int      // En cents (ex: 100 pour 1.00 USD)
+  currency              String   @default("usd")
+  productType           String   // "PREMIUM_PASS_1USD", "PRO_SUBSCRIPTION"
+  status                String   // "succeeded", "pending", "failed"
+  createdAt             DateTime @default(now())
+
+  @@map("payments")
+}
+
+model ProcessedWebhookEvent {
+  eventId   String   @id
+  createdAt DateTime @default(now())
+
+  @@map("processed_webhook_events")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  details   String?
+  createdAt DateTime @default(now())
+
+  @@map("audit_logs")
+}
