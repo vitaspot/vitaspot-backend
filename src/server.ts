@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import nodemailer from 'nodemailer';
 import cors from 'cors';
@@ -9,13 +10,22 @@ app.use(cors());
 app.use(express.json());
 
 // Configuration sécurisée Namecheap
+const smtpHost = process.env.SMTP_HOST || 'mail.privateemail.com';
+const smtpPort = Number(process.env.SMTP_PORT) || 465;
+const smtpUser = process.env.SMTP_USER || 'contact@myvitaspot.com';
+const smtpPass = process.env.SMTP_PASS;
+
+if (!smtpPass) {
+  throw new Error('La variable SMTP_PASS doit être définie dans l’environnement.');
+}
+
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT) || 465,
+  host: smtpHost,
+  port: smtpPort,
   secure: true,
   auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
+    user: smtpUser,
+    pass: smtpPass,
   },
 });
 
@@ -25,7 +35,7 @@ app.post('/api/contact', async (req: Request, res: Response): Promise<void> => {
 
   try {
     await transporter.sendMail({
-      from: `"Serveur VitaSpot" <${process.env.SMTP_USER}>`,
+      from: `"Serveur VitaSpot" <${smtpUser}>`,
       to: 'contact@myvitaspot.com', // Cible fixe et sécurisée
       replyTo: email,
       subject: `VitaSpot - ${objet} (de ${prenom} ${nom})`,
