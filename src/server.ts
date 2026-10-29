@@ -1,11 +1,14 @@
-import cors from 'cors';
-import express from 'express';
-import { Request, Response } from 'express';
-import helmet from 'helmet';
+import express, { Request, Response } from 'express';
 import nodemailer from 'nodemailer';
-import { env } from './config/env';
-import clinicsRouter from './modules/clinics/clinics.routes';
+import cors from 'cors';
 
+const app = express();
+
+// Autorise spécifiquement votre frontend à communiquer avec ce backend
+app.use(cors());
+app.use(express.json());
+
+// Configuration sécurisée Namecheap
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT) || 465,
@@ -16,34 +19,19 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-const app = express();
-const apiPrefix = '/api/v1';
-
-app.use(helmet());
-app.use(cors({
-  origin: env.CORS_ORIGIN.split(',').map(origin => origin.trim()).filter(Boolean)
-}));
-
-app.get('/health', (_req, res) => res.json({ success: true }));
-app.use(express.json());
-app.use(`${apiPrefix}/clinics`, clinicsRouter);
-
+// Route API Contact repensée
 app.post('/api/contact', async (req: Request, res: Response): Promise<void> => {
-  const { nom, email, message, type } = req.body;
-
-  const sujet = type === 'devis'
-    ? `Nouveau Devis VitaSpot de ${nom}`
-    : `Nouveau Message VitaSpot de ${nom}`;
+  const { nom, prenom, email, objet, message } = req.body;
 
   try {
     await transporter.sendMail({
       from: `"Serveur VitaSpot" <${process.env.SMTP_USER}>`,
-      to: 'contact@myvitaspot.com',
+      to: 'contact@myvitaspot.com', // Cible fixe et sécurisée
       replyTo: email,
-      subject: sujet,
-      text: `Nom: ${nom}\nEmail: ${email}\n\nMessage / Détails du devis:\n${message}`,
+      subject: `VitaSpot - ${objet} (de ${prenom} ${nom})`,
+      text: `Nouveau message de : ${prenom} ${nom}\nEmail du contact : ${email}\n\nObjet sélectionné : ${objet}\n\nMessage :\n${message}`,
     });
-
+    
     res.status(200).json({ success: true, message: 'Email envoyé avec succès.' });
   } catch (error) {
     console.error('Erreur SMTP:', error);
@@ -51,6 +39,8 @@ app.post('/api/contact', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-app.listen(env.PORT, () => {
-  console.log(`VitaSpot API disponible sur http://localhost:${env.PORT}`);
+// Port d'écoute pour Vercel
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Serveur démarré sur le port ${PORT}`);
 });
