@@ -29,6 +29,76 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// Route de recherche d'établissements de santé (avec serveurs miroirs anti-panne)
+app.get('/api/clinics', async (req: Request, res: Response): Promise<void> => {
+  const { lat, lon, specialty } = req.query;
+  const latitude = typeof lat === 'string' ? Number(lat) : NaN;
+  const longitude = typeof lon === 'string' ? Number(lon) : NaN;
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) ||
+      latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+    res.status(400).json({ error: 'Coordonnées GPS manquantes ou invalides' });
+    return;
+  }
+
+  if (specialty !== undefined &&
+      (typeof specialty !== 'string' || !/^[a-z0-9_]{1,40}$/i.test(specialty))) {
+    res.status(400).json({ error: 'Spécialité invalide' });
+    return;
+  }
+
+  // Filtrage précis pour éviter de surcharger l'API gratuite
+  const amenityFilter = specialty && specialty !== 'all'
+    ? `["amenity"="${specialty}"]`
+    : `["amenity"~"clinic|hospital|doctors|dentist|pharmacy"]`;
+
+  const overpassQuery = `
+    [out:json][timeout:15];
+    (
+      node${amenityFilter}(around:5000,${latitude},${longitude});
+      way${amenityFilter}(around:5000,${latitude},${longitude});
+    );
+    out center 40;
+  `;
+
+  const mirrors = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+    'https://maps.mail.ru/osm/tools/overpass/api/interpreter'
+  ];
+
+  for (const serverUrl of mirrors) {
+    try {
+      const response = await fetch(serverUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `data=${encodeURIComponent(overpassQuery)}`
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const clinics = (data.elements || []).map((el: any) => ({
+          id: el.id,
+          name: el.tags?.name || 'Établissement de santé',
+          type: el.tags?.amenity || 'clinic',
+          lat: el.lat || el.center?.lat,
+          lon: el.lon || el.center?.lon,
+          phone: el.tags?.phone || el.tags?.['contact:phone'] || 'Non renseigné',
+          address: [el.tags?.['addr:housenumber'], el.tags?.['addr:street'], el.tags?.['addr:city']].filter(Boolean).join(' ') || 'Adresse sur carte',
+          website: el.tags?.website || el.tags?.['contact:website'] || null
+        }));
+
+        res.status(200).json({ clinics });
+        return;
+      }
+    } catch (err) {
+      console.warn(`Échec sur ${serverUrl}, tentative suivante...`);
+    }
+  }
+
+  res.status(503).json({ error: 'Les serveurs cartographiques sont momentanément saturés.' });
+});
+
 // Route API Contact repensée
 app.post('/api/contact', async (req: Request, res: Response): Promise<void> => {
   const { nom, prenom, email, objet, message } = req.body;

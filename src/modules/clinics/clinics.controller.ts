@@ -47,15 +47,9 @@ export const getClinics = async (req: Request, res: Response) => {
       prisma.clinic.count({ where })
     ]);
 
-    const user = (req as any).user;
-    const hasPass = user?.hasPremiumPass || false;
-
     let localData = items.map(c => ({
       ...c,
-      specialties: c.specialties.map(s => s.specialty.name),
-      phone: hasPass ? c.phone : undefined,
-      whatsapp: hasPass ? c.whatsapp : undefined,
-      address: hasPass ? c.address : undefined
+      specialties: c.specialties.map(s => s.specialty.name)
     }));
 
     // 2. REQUÊTE EXTERNE (OpenStreetMap avec sécurité maximale)
