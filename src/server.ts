@@ -29,6 +29,34 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+const specialtyFilters: Record<string, string[]> = {
+  all: [
+    'nwr["amenity"~"clinic|hospital|doctors|dentist|pharmacy"]',
+    'nwr["healthcare"~"doctor|clinic|laboratory"]'
+  ],
+  general: [
+    'nwr["healthcare:speciality"="general"]',
+    'nwr["healthcare"="doctor"]',
+    'nwr["amenity"="doctors"]'
+  ],
+  cardiology: ['nwr["healthcare:speciality"="cardiology"]'],
+  dermatology: ['nwr["healthcare:speciality"="dermatology"]'],
+  paediatrics: ['nwr["healthcare:speciality"="paediatrics"]'],
+  gynaecology: ['nwr["healthcare:speciality"="gynaecology"]'],
+  ophthalmology: ['nwr["healthcare:speciality"="ophthalmology"]'],
+  neurology: ['nwr["healthcare:speciality"="neurology"]'],
+  dentist: ['nwr["amenity"="dentist"]'],
+  clinic: ['nwr["amenity"="clinic"]'],
+  hospital: ['nwr["amenity"="hospital"]'],
+  laboratory: ['nwr["healthcare"="laboratory"]'],
+  physiotherapist: ['nwr["healthcare"="physiotherapist"]'],
+  nurse: ['nwr["healthcare"="nurse"]'],
+  psychologist: ['nwr["healthcare"="psychotherapist"]'],
+  speech_therapist: ['nwr["healthcare"="speech_therapist"]'],
+  podiatrist: ['nwr["healthcare"="podiatrist"]'],
+  radiology: ['nwr["healthcare:speciality"="radiology"]']
+};
+
 // Route de recherche d'établissements de santé (avec serveurs miroirs anti-panne)
 app.get('/api/clinics', async (req: Request, res: Response): Promise<void> => {
   const { lat, lon, specialty } = req.query;
@@ -41,23 +69,23 @@ app.get('/api/clinics', async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  if (specialty !== undefined &&
-      (typeof specialty !== 'string' || !/^[a-z0-9_]{1,40}$/i.test(specialty))) {
+  if (specialty !== undefined && (typeof specialty !== 'string' || !/^[a-z0-9_]{1,40}$/i.test(specialty))) {
     res.status(400).json({ error: 'Spécialité invalide' });
     return;
   }
 
-  // Filtrage précis pour éviter de surcharger l'API gratuite
-  const amenityFilter = specialty && specialty !== 'all'
-    ? `["amenity"="${specialty}"]`
-    : `["amenity"~"clinic|hospital|doctors|dentist|pharmacy"]`;
+  const selectedSpecialty = typeof specialty === 'string' ? specialty : 'all';
+  if (!Object.prototype.hasOwnProperty.call(specialtyFilters, selectedSpecialty)) {
+    res.status(400).json({ error: 'Spécialité invalide' });
+    return;
+  }
+  const queryFilters = specialtyFilters[selectedSpecialty]
+    .map((filter) => `${filter}(around:5000,${latitude},${longitude});`)
+    .join('\n');
 
   const overpassQuery = `
     [out:json][timeout:15];
-    (
-      node${amenityFilter}(around:5000,${latitude},${longitude});
-      way${amenityFilter}(around:5000,${latitude},${longitude});
-    );
+    (${queryFilters});
     out center 40;
   `;
 
@@ -81,9 +109,10 @@ app.get('/api/clinics', async (req: Request, res: Response): Promise<void> => {
           id: el.id,
           name: el.tags?.name || 'Établissement de santé',
           type: el.tags?.amenity || 'clinic',
-          lat: el.lat || el.center?.lat,
-          lon: el.lon || el.center?.lon,
+          lat: el.lat ?? el.center?.lat,
+          lon: el.lon ?? el.center?.lon,
           phone: el.tags?.phone || el.tags?.['contact:phone'] || 'Non renseigné',
+          whatsapp: el.tags?.whatsapp || el.tags?.['contact:whatsapp'] || null,
           address: [el.tags?.['addr:housenumber'], el.tags?.['addr:street'], el.tags?.['addr:city']].filter(Boolean).join(' ') || 'Adresse sur carte',
           website: el.tags?.website || el.tags?.['contact:website'] || null
         }));
